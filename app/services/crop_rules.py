@@ -1,0 +1,2 @@
+"""Deterministic crop suitability logic."""
+
