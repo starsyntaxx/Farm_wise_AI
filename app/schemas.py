@@ -7,7 +7,14 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class StrictModel(BaseModel):
@@ -55,6 +62,19 @@ class InformationImportance(str, Enum):
     REQUIRED = "required"
     USEFUL = "useful"
     OPTIONAL = "optional"
+
+
+class CropSuitabilityStatus(str, Enum):
+    SUITABLE = "suitable"
+    CONDITIONALLY_SUITABLE = "conditionally_suitable"
+    INSUFFICIENT_INFORMATION = "insufficient_information"
+    NOT_RECOMMENDED = "not_recommended"
+
+
+class CropEvidenceStatus(str, Enum):
+    VERIFIED = "verified"
+    INCOMPLETE = "incomplete"
+    ILLUSTRATIVE = "illustrative"
 
 
 def _trim_optional_text(value: Any) -> Any:
@@ -299,6 +319,67 @@ class AgentResponse(StrictModel):
         if self.status is AgentStatus.UNAVAILABLE and not self.limitations:
             raise ValueError("unavailable requires an explanatory limitation")
         return self
+
+
+class CropEvidenceReference(StrictModel):
+    evidence_id: str
+    source_name: str
+    source_url: AnyHttpUrl
+    claim: str
+
+    @field_validator("evidence_id", "source_name", "claim", mode="before")
+    @classmethod
+    def trim_evidence_text(cls, value: Any) -> Any:
+        return _trim_optional_text(value)
+
+
+class CropPlanningRequest(StrictModel):
+    profile: FarmerProfile | None = None
+    location: FarmLocationInput | None = None
+    plot_id: UUID | None = None
+    planting_period: str | None = None
+    water_access: WaterAccess | None = None
+    area_value: float | None = Field(default=None, gt=0)
+    area_unit: AreaUnit | None = None
+    soil_type: str | None = None
+    preferred_crop: str | None = None
+    compare_available_crops: bool = False
+
+    @field_validator("planting_period", "soil_type", "preferred_crop", mode="before")
+    @classmethod
+    def trim_optional_planning_text(cls, value: Any) -> Any:
+        return _trim_optional_text(value)
+
+    @model_validator(mode="after")
+    def planning_area_value_and_unit_are_a_pair(self) -> "CropPlanningRequest":
+        if (self.area_value is None) != (self.area_unit is None):
+            raise ValueError("area_value and area_unit must be supplied together")
+        return self
+
+
+class CropPlanningAPIRequest(CropPlanningRequest):
+    """HTTP planning input; the API loads the profile from persistence."""
+
+    farmer_id: UUID | None = None
+    profile: None = None
+
+
+class CropAssessment(StrictModel):
+    crop_id: str
+    crop_name: str
+    cultivation_system: str
+    evidence_status: CropEvidenceStatus
+    suitability: CropSuitabilityStatus
+    supporting_factors: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    missing_information: list[MissingInformation] = Field(default_factory=list)
+    evidence: list[CropEvidenceReference] = Field(default_factory=list)
+    explanation: str
+
+
+class CropPlanningResult(StrictModel):
+    assessments: list[CropAssessment]
+    ordering_reason: str
 
 
 class FarmerContextRequest(StrictModel):
